@@ -1,0 +1,145 @@
+Project Execution Plan: AI Conference Note-Taking Assistant
+
+**Objective:** To process, contextualize, and synthesize raw conference materials into a single, enriched, and actionable set of notes, outputting a final PDF document for a specified day.
+The process is orchestrated by `run_pipeline.py`, which takes a `--day` (e.g., `day_1`) and a `--verbose` argument.
+
+**Project Root:** `confidential_computing_summit/` (All paths are relative to this unless specified).
+**Configuration:** Paths, model names, and other settings are managed in `scripts/utils/config.py`. Prompts are in `scripts/utils/prompts.py`.
+**Logging:** Centralized logs are stored in `logs/`, with each script generating a day- and timestamp-specific log file (e.g., `logs/phase0_transcribe_audio_day_1_YYYYMMDD_HHMMSS.log`).
+**Working Data:** Intermediate files are stored in day-specific subdirectories under `working_data/` (e.g., `working_data/day_1/`).
+**Input Data Root:** Raw source materials are generally located in the `materials/` subdirectory, often with day-specific filenames or subdirectories.
+
+---
+
+**Phase 0: Audio Transcription (Optional)**
+*Script: `scripts.phase0_transcribe_audio` (run as `python -m scripts.phase0_transcribe_audio` by orchestrator)*
+1.  **Audio File Processing:**
+    *   **Input:** Raw audio file for the specified day (e.g., `materials/day_1_recording.aac`). Path obtained via `config.get_raw_audio_file(day_identifier)`.
+    *   **Action:**
+        *   The script chunks the audio locally using `ffmpeg`.
+        *   Each chunk is uploaded to a Gemini model for transcription.
+        *   Transcriptions are consolidated.
+    *   **Output:** A single master transcript file for the day (e.g., `materials/day_1_recording_transcript.txt`). Path obtained via `config.get_master_transcript_file(day_identifier)`.
+    *   **Skip Condition:** Phase is skipped if the output transcript file already exists and is non-empty.
+    *   **Script Considerations:**
+        *   Uses `ffmpeg` for audio chunking.
+        *   Utilizes `config.py` for day-specific input/output paths (e.g., `config.get_temp_audio_chunks_dir(day_identifier)` for temporary chunk storage in `working_data/{day}/temp_audio_chunks/`) and Gemini model configuration.
+
+---
+
+**Phase 1: Asset Pre-processing & Extraction**
+*Script: `scripts.phase1_asset_processing` (run as `python -m scripts.phase1_asset_processing`)*
+
+1.  **Slide Content Extraction:**
+    *   **Input:** `.jpg` and other supported image files from the day-specific slide directory (e.g., `materials/day_1_slides/`). Path from `config.get_raw_slides_dir(day_identifier)`.
+    *   **Action:**
+        *   Calls `scripts.utils.slide_extractor.process_slides(day_identifier)`.
+        *   `slide_extractor.py` iterates through images in `materials/{day}/slides/`.
+        *   For each `.jpg`, perform OCR to extract text using Gemini Vision model.
+        *   Identify and reconstruct tables into a text-based format (e.g., Markdown).
+        *   Analyze diagrams/flowcharts and describe them in text.
+        *   Extract capture timestamp from image EXIF data (or file modification time as fallback).
+        *   Uses `OCR_PROMPT` from `scripts/utils/prompts.py`.
+    *   **Output:** A single day-specific text file `extracted_slide_content.txt` (e.g., `working_data/day_1/extracted_slide_content.txt`). Path via `config.get_extracted_slide_content_file(day_identifier)`. Each entry prepended with its timestamp.
+    *   **Script Considerations:**
+        *   `slide_extractor.py` handles image iteration, timestamp extraction (EXIF or file modification), and Gemini Vision calls.
+
+2.  **Slide Image Preparation (Cropping & Resizing):**
+    *   **Input:** `.jpg` files from the day-specific slide directory (e.g., `materials/day_1_slides/`). Path from `config.get_raw_slides_dir(day_identifier)`.
+    *   **Action:**
+        *   For each `.jpg` image:
+            *   Programmatically crop to isolate slide content.
+            *   Resize (preserving aspect ratio) to fit target dimensions (e.g., 1920x1080 from `config.py`).
+            *   Paste onto a new canvas of target dimensions with a specified background color (from `config.py`).
+    *   **Output:** Processed images saved into `working_data/{day}/cropped_slides/`. Path via `config.get_cropped_slides_dir(day_identifier)`. Original filenames are retained.
+    *   **Script Considerations:** Uses `scripts.utils.image_utils.prepare_slide_fullscreen`. Image processing library: Pillow.
+
+---
+
+**Phase 2: Contextualization & Mapping**
+*Script: `scripts.phase2_contextualization` (run as `python -m scripts.phase2_contextualization`)*
+
+1.  **Session Identification & Audio Segmentation:**
+    *   **Input:**
+        *   Agenda: `materials/agenda.txt` (via `config.AGENDA_FILE`).
+        *   User Notes: `materials/{day}/day_1_notes.txt` (via `config.get_user_notes_file(day_identifier)`).
+        *   Master Transcript: `materials/{day}/day_1_recording_transcript.txt` (via `config.get_master_transcript_file(day_identifier)`).
+        *   Extracted Slide Content: `working_data/{day}/extracted_slide_content.txt` (via `config.get_extracted_slide_content_file(day_identifier)`).
+    *   **Action (LLM-driven):**
+        *   Parse `agenda.txt`.
+        *   LLM call using `PHASE2_CONTEXT_PROMPT` (from `prompts.py`) to identify attended sessions and map slides to sessions.
+        *   Output of mapping: `working_data/{day}/slide_session_mapping.json` (via `config.get_slide_session_mapping_file(day_identifier)`).
+        *   LLM call using `PHASE2_MERGE_PROMPT` to merge session titles into `extracted_slide_content.txt`.
+        *   Output of merge: `working_data/{day}/mapped_extracted_slide_content.txt` (via `config.get_mapped_slide_content_file(day_identifier)`).
+        *   LLM call using `PHASE2_AUDIO_SEGMENTATION_PROMPT` to segment the master transcript based on attended sessions.
+        *   Output of segmentation: A single text file `working_data/{day}/llm_raw_audio_segmentation_output.txt` (via `config.get_raw_llm_audio_segmentation_output_txt(day_identifier)`) containing all relevant session transcripts, demarcated by session titles. (No longer separate files per session).
+    *   **Script Considerations:** Uses Gemini models for contextualization tasks. Relies on `scripts.utils.agenda_utils`.
+
+2.  **Slide-to-Session Mapping:**
+    *   This is now part of the LLM-driven contextualization in step 1 of this phase. The output is `working_data/{day}/slide_session_mapping.json`.
+
+---
+
+**Phase 3: Synthesis & Enrichment**
+*Script: `scripts.phase3_synthesis` (run as `python -m scripts.phase3_synthesis`)*
+
+1.  **Initialize from Manual Notes:**
+    *   **Input:** Day-specific user notes `materials/{day}/notes.txt` (via `config.get_user_notes_file(day_identifier)`).
+    *   **Action:** User notes serve as the structural backbone for the LLM synthesis.
+
+2.  **Placeholder Resolution & Enrichment (LLM-driven):**
+    *   **Input:**
+        *   The loaded manual notes content.
+        *   Day-specific mapped slide content: `working_data/{day}/mapped_extracted_slide_content.txt` (via `config.get_mapped_slide_content_file(day_identifier)`).
+        *   Day-specific segmented audio transcripts text: `working_data/{day}/llm_raw_audio_segmentation_output.txt` (via `config.get_raw_llm_audio_segmentation_output_txt(day_identifier)`).
+    *   **Action:** An LLM (using `PHASE3_SYNTHESIS_PROMPT` from `prompts.py`) synthesizes notes:
+        *   Resolves `[slides]` placeholders by integrating relevant slide content and adding Obsidian-style image references (e.g., `![[cropped_slides/IMG_1234.jpg]]`).
+        *   Resolves `[audio]` placeholders by inserting quotes/summaries from the audio.
+        *   Proactively enriches all notes, especially bullet points, with details from audio transcripts.
+        *   `[todo]`: Extract and collect these items into a separate list.
+    *   The LLM is instructed to return enriched Markdown and to-do items in clearly delimited text blocks. The script parses these blocks.
+    *   **Output:**
+        *   Enriched notes: `working_data/{day}/enriched_notes.md` (via `config.get_enriched_notes_md_file(day_identifier)`).
+        *   To-do items list: `working_data/{day}/todo_raw.json` (via `config.get_todo_raw_json_file(day_identifier)`).
+        *   Raw LLM response: `working_data/{day}/llm_raw_phase3_synthesis_output.txt` (via `config.get_raw_llm_phase3_synthesis_output_txt(day_identifier)`).
+    *   **Script Considerations:** The success of this phase heavily relies on the quality of the LLM's output and its adherence to the prompt.
+
+---
+
+**Phase 4: Final Compilation & Delivery**
+*Script: `scripts.phase4_compilation` (run as `python -m scripts.phase4_compilation`)*
+
+1.  **Compile "Action Items" Section:**
+    *   **Input:** Day-specific list of to-do items from `working_data/{day}/todo_raw.json` (via `config.get_todo_raw_json_file(day_identifier)`).
+    *   **Action:**
+        *   Formats the to-do items into a Markdown checklist. (Web search for URLs has been removed).
+    *   **Output:** A formatted string or section for "Action Items & Further Reading."
+
+2.  **Generate Final Document:**
+    *   **Input:**
+        *   The day-specific enriched notes: `working_data/{day}/enriched_notes.md` (via `config.get_enriched_notes_md_file(day_identifier)`).
+        *   The formatted "Action Items" section.
+    *   **Action:**
+        *   Prepend the "Action Items" section to the enriched notes.
+        *   Convert Obsidian-style image links (e.g., `![[cropped_slides/IMG_1234.jpg]]`) to standard Markdown image links using absolute `file:///` URLs based on images in `working_data/{day}/cropped_slides/` (path from `config.get_cropped_slides_dir(day_identifier)`).
+        *   Convert the entire compiled content (Markdown with image references) into a PDF.
+    *   **Output:** Final PDF file: `output/Conference_Notes_CCS25_{day}.pdf`. Path via `config.get_final_pdf_file(day_identifier)`.
+    *   **Debugging Output:** If PDF generation fails, an HTML version of the input is saved to `working_data/{day}/failed_pdf_generation_input_{day}.html`.
+    *   **Script Considerations:**
+        *   Markdown-to-PDF conversion using `markdown2` and `WeasyPrint`.
+        *   Image embedding handled by WeasyPrint using `file:///` URLs.
+        *   Ensuring professional layout and styling in the PDF.
+
+---
+
+**General Scripting Considerations:**
+
+*   **Modular Design:** Each phase is handled by a separate script.
+*   **Configuration:** Paths, model names, etc., are managed in `scripts/utils/config.py`. Prompts are in `scripts.utils.prompts.py`. Scripts accept `--day` and `--verbose` arguments via `argparse`.
+*   **Error Handling:** Scripts include try-except blocks for common errors.
+*   **Logging:** Standardized logging to `logs/` directory with filenames like `<script_name>_{day}_{timestamp}.log`.
+*   **Intermediate Data:** Stored in day-specific subdirectories under `working_data/` (e.g., `working_data/day_1/`).
+*   **Dependencies:** All Python package dependencies should be listed in `requirements.txt`. (Acknowledged this file has changed, ensure it's up-to-date with libraries needed for OCR, HEIC, image processing, PDF generation, etc.).
+
+---
+This execution plan provides a roadmap. Each step will require detailed implementation and testing.

@@ -1,0 +1,14 @@
+google-generativeai
+python-dotenv
+weasyprint
+markdown2
+googlesearch-python
+beautifulsoup4
+requests
+pillow-heif
+Pillow
+pydub
+opencv-python-headless
+piexif
+beautifulsoup4
+requests

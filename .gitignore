@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+env/
+.env
+
+# Instance/sensitive data
+.env
+*.envrc
+instance/
+secrets/
+
+# IDE/Editor specific
+.idea/
+.vscode/
+.ropeproject/
+.zed/
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# Project specific
+# Log files (already generated in a separate directory outside git for this project)
+logs/
+
+# Intermediate working data (already generated in a separate directory outside git for this project)
+working_data/
+
+# Output files (if they shouldn't be tracked)
+output/
+
+# Raw input materials (if they shouldn't be tracked, e.g., large or sensitive)
+materials/
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# IPython Notebook checkpoints
+.ipynb_checkpoints

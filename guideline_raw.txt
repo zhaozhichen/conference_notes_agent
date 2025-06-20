@@ -1,0 +1,18 @@
+You are a professional conference note-taking assistant. I have following materials:
+1, Conference agenda: https://www.confidentialcomputingsummit.com/e/ccs25/page/agenda
+2, Speech audio recording transcript. e.g.: day_1_recording_transcript.txt
+3, Photos of the slides. e.g.: day_1_slides/
+4, My manual notes. e.g.: day_1_notes.txt. They are my quick thoughts and keywords. They could be scattered, not complete, but reflecting what's important to me. In the notes, there are some placeholders:
+[slides]: I didn't have time to write down notes from the slides. They should be retrieved from one of the slide photos.
+[audio]: I didn't have time to write down notes. They should be retrieved from the speech transcripts.
+[todo]: something I need to spend time afterwards. Could be reading a paper / blog post, or some concepts to learn more about.
+
+Your tasks is described as follows. Note:
+Formulate this taskflow and write a plan in a scratchpad file. Track the progress in the stratchpad as you do the tasks.
+Tasks:
+1, For each slide photo, extract the content. For texts, do OCR. For tables, try to keep the format. For flow charts, try to keep the logical relations. Each picture has two versions: .HEIC contains the metadata. Extract the timestamp from it and put it before the extracted text. The other file, .jpg, is the ones for you to extract content (for some reason, you cannot process HEIC directly). Put all extracted texts in one text file.
+2, For each slide photo, crop it properly. It will be inserted to the final notes pdf at the proper position.
+3, For each slide photo, cross check with the conference agenda, try to match the session title for the slide. Note that for the breakout sessions, I only attend one out of three at one time. You should know which one I attended from my manual notes doc.
+4, For audio recording transcript, split it into sessions (keynote speech, breakdown sessions). Based on the transcript content, break it into chunks and assign speech titles accordingly. Note that I attend one breakout session at one time. You should know which one I attended from my manual notes doc.
+5, This is the most important part: notes enrichment. Based on my manual notes, enrich it from audio transcripts and text info extracted from slides. Insert missing info for [slides] and [audio]. Add reference to cropped images with file path and name. For [todo], collect resources and compile them at the beginning of the notes. Add tips of what should I do as homework.
+6, Compile the enriched notes and referenced cropped slides images into a nice visualization. html / pdf, your call.

@@ -1,0 +1,116 @@
+### **Task Guideline: AI Conference Note-Taking Assistant**
+
+**Objective:**
+Your primary objective is to act as an automated AI note-taking assistant. The system will process, contextualize, and synthesize a collection of raw conference materials for a specific day into a single, enriched, and actionable set of notes. The final output should be a polished PDF document that integrates user's manual observations with detailed information from session recordings and presentation slides. The entire process is orchestrated by `run_pipeline.py` which accepts a `--day` identifier (e.g., `day_1`) and a `--verbose` flag for detailed logging. All intermediate working files and logs are generally stored in day-specific subdirectories (e.g., `working_data/day_1/`, `logs/`).
+
+---
+
+### **Source Materials (Inputs):**
+
+1.  **Conference Agenda:** A text file containing the official schedule of talks, including titles, speakers, and times for keynotes and parallel breakout sessions. This file is considered common for all days.
+    * *Example:* `materials/agenda.txt`
+2.  **Audio Recording Transcript:** A single text file containing the complete, time-stamped (if available) transcription of all attended sessions for the specified day. This is an *input* to the pipeline if transcription (Phase 0) is skipped, or an *output* of Phase 0 if raw audio is provided.
+    * *Example (for `day_1`):* `materials/day_1_recording_transcript.txt`
+3.  **Slide Photographs:** A directory of photos taken of the presentation slides for the specified day.
+    * A `.jpg` file (or other supported image format) is used for content extraction (OCR, image analysis).
+    * Timestamps are extracted from EXIF data of these images, or file modification time as a fallback. (No specific reliance on `.HEIC` for metadata in the current version).
+    * *Example (for `day_1`):* `materials/day_1_slides/`
+4.  **User's Manual Notes:** A text file containing scattered, time-sensitive thoughts, keywords, and questions for the specified day. This document is the primary guide for determining which content is most important and contains the following placeholders:
+    * `[slides]`: Indicates a point where information from a presentation slide is needed.
+    * `[audio]`: Indicates a point where a verbatim quote or detailed explanation from the speaker is needed.
+    * `[todo]`: Marks an action item, such as a paper to read, a concept to research, or a person to contact.
+    * *Example (for `day_1`):* `materials/day_1_notes.txt`
+5.  **(Optional) Raw Audio File:** A raw audio recording for the specified day, if audio transcription is to be performed by the pipeline.
+    * *Example (for `day_1`):* `materials/day_1_recording.aac` (or other ffmpeg-supported format)
+
+---
+
+### **Task Workflow & Instructions:**
+
+The system follows a structured, multi-phase process, orchestrated by `run_pipeline.py`. Each phase script generates detailed logs saved to a central `logs/` directory, with filenames indicating the phase, day, and timestamp. Intermediate data is stored in day-specific subdirectories under `working_data/ (e.g., `working_data/day_1/`).
+
+#### **Phase 0: Audio Transcription (Optional)**
+*Script: `scripts.phase0_transcribe_audio`*
+*This phase processes a raw audio file for the specified day into a text transcript if a pre-existing transcript is not available or is empty.*
+1.  **Audio Processing:**
+    *   **Input:** Raw audio file for the day (e.g., `materials/day_1_recording.aac`).
+    *   **Action:** The audio is chunked locally using `ffmpeg`. Each chunk is uploaded to a Gemini model for transcription. The individual transcriptions are then consolidated.
+    *   **Output:** A single master transcript file for the day (e.g., `materials/day_1_recording_transcript.txt`).
+    *   **Temporary Files:** Audio chunks are stored temporarily in `working_data/{day}/temp_audio_chunks/`.
+
+#### **Phase 1: Asset Pre-processing & Extraction**
+*Script: `scripts.phase1_asset_processing`*
+*This phase focuses on converting raw materials into structured, usable data.*
+
+1.  **Slide Content Extraction:**
+    * **Input:** `.jpg` (or other supported) images from the day-specific slide directory (e.g., `materials/day_1_slides/`).
+    * **Action:** For each image:
+        * Perform a comprehensive content analysis using a Gemini Vision model (via `scripts.utils.slide_extractor.py`).
+        * **Timestamping:** Retrieve the capture timestamp from the image's EXIF data, falling back to file modification time.
+    * **Output:** Consolidate all extracted content into a single day-specific text file (e.g., `working_data/day_1/extracted_slide_content.txt`). Each entry is prepended with its timestamp (e.g., `[YYYY-MM-DD HH:MM:SS (Source)] Slide: FILENAME.jpg`).
+
+2.  **Slide Image Preparation:**
+    * **Input:** `.jpg` (or other supported) images from the day-specific slide directory (e.g., `materials/day_1_slides/`).
+    * **Action:** For each image, programmatically crop it to remove background distractions, resize it (preserving aspect ratio) to fit within target dimensions (e.g., 1920x1080), and paste it onto a new canvas of target dimensions (e.g., black background) to create a standardized "fullscreen" version.
+    * **Output:** Save these processed images into a day-specific directory (e.g., `working_data/day_1/cropped_slides/`), retaining their original filenames.
+
+#### **Phase 2: Contextualization & Mapping**
+*Script: `scripts.phase2_contextualization`*
+*This phase aligns the extracted data with the conference agenda and the user's attendance record using LLM assistance.*
+
+1.  **Session Identification (LLM-based):**
+    * **Inputs:** `materials/agenda.txt`, day-specific user notes (e.g., `materials/day_1_notes.txt`), and day-specific extracted slide content (e.g., `working_data/day_1/extracted_slide_content.txt`).
+    * **Action:** An LLM analyzes the inputs to identify which conference sessions the user likely attended and maps each slide (from the extracted slide content) to a determined session title based on timestamps and agenda information.
+    * **Output:** A day-specific JSON file mapping slides to sessions (e.g., `working_data/day_1/slide_session_mapping.json`).
+
+2.  **Session Title Merging (LLM-based):**
+    * **Inputs:** Day-specific extracted slide content and the slide-to-session mapping JSON.
+    * **Action:** An LLM merges the determined session titles into the extracted slide content document. Each slide entry in the output will now include its associated session title.
+    * **Output:** A day-specific text file with mapped slide content (e.g., `working_data/day_1/mapped_extracted_slide_content.txt`).
+
+3.  **Audio Transcript Segmentation (LLM-based):**
+    * **Inputs:** Day-specific master audio transcript (e.g., `materials/day_1_recording_transcript.txt`), the conference agenda, and the list of attended session titles (identified in step 1 of this phase).
+    * **Action:** An LLM segments the master transcript.
+    * **Output:** A single day-specific text file (e.g., `working_data/day_1/llm_raw_audio_segmentation_output.txt`) containing all attended session transcripts, clearly delineated by session title markers.
+
+#### **Phase 3: Synthesis & Enrichment (Primary Task)**
+*Script: `scripts.phase3_synthesis`*
+*This is the core synthesis phase. It uses the user's manual notes as the blueprint to build the final document, enriching it with content from slides and audio transcripts using an LLM.*
+
+1.  **Inputs:**
+    * Day-specific user manual notes (e.g., `materials/day_1_notes.txt`).
+    * Day-specific mapped slide content (e.g., `working_data/day_1/mapped_extracted_slide_content.txt`).
+    * Day-specific segmented audio transcripts text (e.g., `working_data/day_1/llm_raw_audio_segmentation_output.txt`).
+
+2.  **Action (LLM-driven Synthesis):**
+    * The LLM processes the user's manual notes as the primary structure.
+    * It resolves `[slides]` placeholders by integrating relevant content (text, table summaries, diagram descriptions) from the mapped slide content and adds a Markdown reference to the corresponding cropped image (e.g., `![[cropped_slides/IMG_1234.jpg]]`).
+    * It resolves `[audio]` placeholders by inserting pertinent quotes or summaries from the segmented audio transcripts.
+    * The LLM is instructed to proactively enrich all notes, especially succinct bullet points, with relevant details from audio transcripts, even if no explicit `[audio]` tag is present.
+    * It extracts all `[todo]` items into a separate list.
+    * The LLM returns the enriched Markdown notes and the list of to-do items as distinct text blocks (using custom delimiters). The script then parses these blocks.
+
+3.  **Outputs:**
+    * Enriched notes in Markdown format (e.g., `working_data/day_1/enriched_notes.md`).
+    * A list of to-do items in JSON format (e.g., `working_data/day_1/todo_raw.json`).
+    * The raw text response from the LLM is also saved for debugging (e.g., `working_data/day_1/llm_raw_phase3_synthesis_output.txt`).
+
+#### **Phase 4: Final Compilation & Delivery**
+*Script: `scripts.phase4_compilation`*
+*This phase focuses on creating the final, polished deliverable.*
+
+1.  **Compile "Action Items" Section:**
+    * **Input:** Day-specific to-do items list (e.g., `working_data/day_1/todo_raw.json`).
+    * **Action:** Formats the to-do items into a Markdown checklist section titled "## Action Items & Further Reading". (Current version does not perform web searches for URLs).
+
+2.  **Prepare Final Markdown:**
+    * **Input:** Day-specific enriched Markdown notes and the formatted Action Items section.
+    * **Action:**
+        * Prepends the "Action Items" section to the enriched notes.
+        * Converts Obsidian-style image links (e.g., `![[cropped_slides/IMG_1234.jpg]]`) within the notes to standard Markdown image links using absolute `file:///` URLs, based on images in the day-specific `working_data/{day}/cropped_slides/` directory.
+
+3.  **Generate Final Document (PDF):**
+    * **Input:** The fully compiled Markdown content.
+    * **Action:** Converts the Markdown to HTML and then generates a PDF using the WeasyPrint library.
+    * **Deliverable:** A self-contained, high-quality PDF file named `Conference_Notes_CCS25_{day_identifier}.pdf` (e.g., `output/Conference_Notes_CCS25_day_1.pdf`).
+    * **Debugging Output:** If PDF generation fails, an HTML version of the input is saved (e.g., `working_data/day_1/failed_pdf_generation_input_day_1.html`).
