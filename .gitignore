@@ -33,9 +33,6 @@ logs/
 # Intermediate working data (already generated in a separate directory outside git for this project)
 working_data/
 
-# Output files (if they shouldn't be tracked)
-output/
-
 # Raw input materials (if they shouldn't be tracked, e.g., large or sensitive)
 materials/
 
